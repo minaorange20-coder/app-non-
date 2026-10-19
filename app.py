@@ -96,7 +96,6 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
         final_url = clean_url
         html_content = ""
 
-    # استخراج الإحداثيات
     match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
     if match:
         coords_x = match.group(1)
@@ -107,7 +106,6 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
             coords_x = match_q.group(1)
             coords_y = match_q.group(2)
 
-    # استخراج اسم المكان من الرابط النهائي
     place_match = re.search(r'/place/([^/@]+)', final_url)
     if place_match:
         raw_name = place_match.group(1)
@@ -119,7 +117,6 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
             if not re.match(r'^-?\d+\.\d+,-?\d+\.\d+$', raw_query):
                 place_name = unquote(raw_query).replace('+', ' ').strip()
 
-    # إذا لم يستخرج الاسم من الرابط، استخرجه من عنوان الصفحة HTML (og:title)
     if not place_name or place_name == "Shop":
         title_match = re.search(r'<meta property="og:title" content="([^"]+)"', html_content)
         if title_match:
@@ -308,4 +305,68 @@ with tab2:
                 dial_col = st.selectbox("حدد عمود الـ DIAL (مطلوب):", all_cols, index=0 if 'DIAL' not in all_cols else all_cols.index('DIAL'))
                 url_col = st.selectbox("حدد عمود الرابط (مطلوب):", all_cols, index=0 if 'URL' not in all_cols else all_cols.index('URL'))
             
-            with col_sel
+            with col_sel2:
+                shop_name_col = st.selectbox("حدد عمود اسم المحل (إذا كان موجوداً بالفولدر):", options)
+                address_col = st.selectbox("حدد عمود العنوان (إذا كان موجوداً بالفولدر):", options)
+
+            if st.button("⚙️ البدء في المعالجة"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                bulk_rows = []
+                total = len(input_df)
+                
+                for idx, row_data in input_df.iterrows():
+                    d_val = row_data[dial_col]
+                    u_val = row_data[url_col]
+                    
+                    s_name_val = row_data[shop_name_col] if shop_name_col != "-- غير محدد --" else ""
+                    addr_val = row_data[address_col] if address_col != "-- غير محدد --" else ""
+                    
+                    status_text.text(f"جاري معالجة الصف {idx+1} من {total}...")
+                    
+                    if is_arabic(s_name_val):
+                        processed = process_single_row(dial=d_val, gmaps_url=u_val, shop_ar_manual=s_name_val, address_manual=addr_val, religion=bulk_religion)
+                    else:
+                        processed = process_single_row(dial=d_val, gmaps_url=u_val, shop_en_manual=s_name_val, address_manual=addr_val, religion=bulk_religion)
+                        
+                    bulk_rows.append(processed)
+                    progress_bar.progress((idx + 1) / total)
+                    
+                st.session_state.data_list.extend(bulk_rows)
+                st.success(f"🎉 تم معالجة {total} محل بنجاح!")
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
+
+# -------------------------------------------------------------
+# 3. عرض الجدول التفاعلي وحفظ التعديلات
+# -------------------------------------------------------------
+if st.session_state.data_list:
+    st.divider()
+    st.subheader("✏️ الجدول التفاعلي (يمكنك تعديل أي خلية أو إضافة/حذف صفوف قبل التحميل)")
+    
+    df_current = pd.DataFrame(st.session_state.data_list)
+    
+    edited_df = st.data_editor(
+        df_current, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        key="data_editor_table"
+    )
+    
+    st.session_state.data_list = edited_df.to_dict('records')
+    
+    col_dl, col_clr = st.columns([3, 1])
+    with col_dl:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            edited_df.to_excel(writer, index=False, sheet_name='Consumer Wallet')
+        st.download_button(
+            label="📥 تحميل شيت الإكسيل المعدل والمحدث",
+            data=output.getvalue(),
+            file_name="mina_non_telecom_final.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    with col_clr:
+        if st.button("🗑️ مسح الجدول بالكامل"):
+            st.session_state.data_list = []
+            st.rerun()
