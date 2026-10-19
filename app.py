@@ -240,4 +240,84 @@ with tab1:
             p2p_or_atm = st.selectbox("P2P OR ATM", ["P2P", "ATM"])
             shop_photo = st.selectbox("Shop Photo", ["yes", "no"])
 
-        submitted = st.
+        submitted = st.form_submit_button("➕ إضافة المحل للجدول")
+
+    if submitted:
+        row = process_single_row(
+            dial=dial_input, gmaps_url=gmaps_url, shop_en_manual=shop_name_input, 
+            shop_ar_manual=shop_ar_input, owner_name_manual=owner_name_input, religion=owner_religion,
+            channel=channel, business_nature=business_nature, sub_market=sub_market, region=region, 
+            gov=gov, area=area, agent_id=agent_id, field_agent=field_agent, 
+            area_manager=area_manager, regional=regional, p2p_or_atm=p2p_or_atm, 
+            shop_photo_manual=shop_photo
+        )
+        st.session_state.data_list.append(row)
+        st.success(f"تمت الإضافة بنجاح وتنزيل الصورة بشكل سليم! 👈 [المالك: {row['Owner Name']}]")
+
+with tab2:
+    st.subheader("📤 رفع شيت يضم الـ DIAL والروابط")
+    uploaded_file = st.file_uploader("اختر ملف إكسيل (.xlsx)", type=["xlsx", "xls"])
+    bulk_religion = st.selectbox("اختر الديانة العامة للملف المرفوع:", ["مسلم", "مسيحي"], key="bulk_rel")
+    
+    if uploaded_file is not None:
+        try:
+            input_df = pd.read_excel(uploaded_file)
+            st.write("📊 معاينة أولية للملف المرفوع:")
+            st.dataframe(input_df.head(5))
+            
+            cols = input_df.columns.tolist()
+            dial_col = st.selectbox("حدد عمود الـ DIAL:", cols, index=0 if 'DIAL' not in cols else cols.index('DIAL'))
+            url_col = st.selectbox("حدد عمود الرابط:", cols, index=0 if 'URL' not in cols else cols.index('URL'))
+            
+            if st.button("⚙️ البدء في المعالجة"):
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+                bulk_rows = []
+                total = len(input_df)
+                
+                for idx, row_data in input_df.iterrows():
+                    d_val = row_data[dial_col]
+                    u_val = row_data[url_col]
+                    status_text.text(f"جاري معالجة الصف {idx+1} من {total}...")
+                    processed = process_single_row(dial=d_val, gmaps_url=u_val, religion=bulk_religion)
+                    bulk_rows.append(processed)
+                    progress_bar.progress((idx + 1) / total)
+                    
+                st.session_state.data_list.extend(bulk_rows)
+                st.success(f"🎉 تم معالجة {total} محل وحفظ الصور سليمة في مجلد downloads!")
+        except Exception as e:
+            st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
+
+# -------------------------------------------------------------
+# 3. عرض الجدول التفاعلي وحفظ التعديلات
+# -------------------------------------------------------------
+if st.session_state.data_list:
+    st.divider()
+    st.subheader("✏️ الجدول التفاعلي (يمكنك تعديل أي خلية أو إضافة/حذف صفوف قبل التحميل)")
+    
+    df_current = pd.DataFrame(st.session_state.data_list)
+    
+    edited_df = st.data_editor(
+        df_current, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        key="data_editor_table"
+    )
+    
+    st.session_state.data_list = edited_df.to_dict('records')
+    
+    col_dl, col_clr = st.columns([3, 1])
+    with col_dl:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            edited_df.to_excel(writer, index=False, sheet_name='Consumer Wallet')
+        st.download_button(
+            label="📥 تحميل شيت الإكسيل المعدل والمحدث",
+            data=output.getvalue(),
+            file_name="mina_non_telecom_final.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    with col_clr:
+        if st.button("🗑️ مسح الجدول بالكامل"):
+            st.session_state.data_list = []
+            st.rerun()
