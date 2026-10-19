@@ -147,7 +147,7 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
 
 def process_single_row(dial, gmaps_url, shop_en_manual="", shop_ar_manual="", owner_name_manual="", religion="مسلم",
                        channel="Non Telecom-Retail", business_nature="Super_Market", sub_market="Market",
-                       region="East Delta and Canal", gov="Kafr El-Sheikh", area="Kafr El-Sheikh",
+                       region="East Delta and Canal", gov="Kafr El-Sheikh", area="Kafr El-Sheikh", address_manual="",
                        agent_id="105631", field_agent="Mina George Ibrahim", area_manager="Delta vacant",
                        regional="Ibrahim Mohamed El Sherbini", p2p_or_atm="P2P", shop_photo_manual="yes"):
     
@@ -172,6 +172,26 @@ def process_single_row(dial, gmaps_url, shop_en_manual="", shop_ar_manual="", ow
     else:
         final_ar_name = raw_name if is_arabic(raw_name) else translate_text(raw_name, target_lang='ar')
 
+    # تحديد العنوان (يدوياً إذا تم إدخاله، أو تلقائياً من الرابط، أو افتراضياً المحافظة والمنطقة)
+    if str(address_manual).strip() and not pd.isna(address_manual):
+        user_address = str(address_manual).strip()
+        if is_arabic(user_address):
+            final_ar_address = user_address
+            final_en_address = translate_text(user_address, target_lang='en')
+        else:
+            final_en_address = user_address
+            final_ar_address = translate_text(user_address, target_lang='ar')
+    elif raw_name and raw_name != "Shop":
+        if is_arabic(raw_name):
+            final_ar_address = f"{gov} - {area} - {raw_name}"
+            final_en_address = translate_text(final_ar_address, target_lang='en')
+        else:
+            final_en_address = f"{gov} - {area} - {raw_name}"
+            final_ar_address = translate_text(final_en_address, target_lang='ar')
+    else:
+        final_en_address = f"{gov} - {area}"
+        final_ar_address = f"{gov}-{area}"
+
     return {
         'DIAL': str(dial) if not pd.isna(dial) else '',
         'Channel': channel,
@@ -182,8 +202,8 @@ def process_single_row(dial, gmaps_url, shop_en_manual="", shop_ar_manual="", ow
         'REGION': region,
         'Gov': gov,
         'Area': area,
-        'Address': f"{gov} - {area}",
-        'Arabic Address': f"{gov}-{area}",
+        'Address': final_en_address,
+        'Arabic Address': final_ar_address,
         'Agent ID': agent_id,
         'Field Agent': field_agent,
         'Area Manager': area_manager,
@@ -221,6 +241,7 @@ with tab1:
             gmaps_url = st.text_input("رابط Google Maps أو رابط الصورة المباشر")
             shop_name_input = st.text_input("اسم المحل بالإنجليزي (اختياري)")
             shop_ar_input = st.text_input("اسم المحل بالعربي (اختياري)")
+            address_input = st.text_input("العنوان (اختياري - سيتم استخراجه من اللينك إذا ترك فارغاً)")
             owner_religion = st.selectbox("ديانة صاحب المحل (لتوليد الاسم تلقائياً)", ["مسلم", "مسيحي"])
             owner_name_input = st.text_input("اسم صاحب المحل بالإنجليزي (اختياري)")
             
@@ -247,7 +268,7 @@ with tab1:
             dial=dial_input, gmaps_url=gmaps_url, shop_en_manual=shop_name_input, 
             shop_ar_manual=shop_ar_input, owner_name_manual=owner_name_input, religion=owner_religion,
             channel=channel, business_nature=business_nature, sub_market=sub_market, region=region, 
-            gov=gov, area=area, agent_id=agent_id, field_agent=field_agent, 
+            gov=gov, area=area, address_manual=address_input, agent_id=agent_id, field_agent=field_agent, 
             area_manager=area_manager, regional=regional, p2p_or_atm=p2p_or_atm, 
             shop_photo_manual=shop_photo
         )
