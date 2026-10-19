@@ -50,8 +50,8 @@ def is_arabic(text):
     return bool(re.search(r'[\u0600-\u06FF]', str(text)))
 
 def translate_text(text, target_lang):
-    if not text or text == "Shop":
-        return text
+    if not text or str(text).strip() in ["Shop", ""]:
+        return str(text)
     try:
         translated = GoogleTranslator(source='auto', target=target_lang).translate(str(text))
         return translated if translated else str(text)
@@ -68,7 +68,7 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
         
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
         'Referer': 'https://www.google.com/'
     }
     
@@ -96,6 +96,7 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
         final_url = clean_url
         html_content = ""
 
+    # استخراج الإحداثيات
     match = re.search(r'@(-?\d+\.\d+),(-?\d+\.\d+)', final_url)
     if match:
         coords_x = match.group(1)
@@ -105,7 +106,8 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
         if match_q:
             coords_x = match_q.group(1)
             coords_y = match_q.group(2)
-            
+
+    # استخراج اسم المكان من الرابط النهائي
     place_match = re.search(r'/place/([^/@]+)', final_url)
     if place_match:
         raw_name = place_match.group(1)
@@ -116,6 +118,13 @@ def parse_google_maps_url_and_download_photo(url, shop_identifier="shop"):
             raw_query = query_match.group(1)
             if not re.match(r'^-?\d+\.\d+,-?\d+\.\d+$', raw_query):
                 place_name = unquote(raw_query).replace('+', ' ').strip()
+
+    # إذا لم يستخرج الاسم من الرابط، استخرجه من عنوان الصفحة HTML (og:title)
+    if not place_name or place_name == "Shop":
+        title_match = re.search(r'<meta property="og:title" content="([^"]+)"', html_content)
+        if title_match:
+            title_text = title_match.group(1)
+            place_name = title_text.split('·')[0].split('-')[0].strip()
 
     if html_content:
         img_patterns = [
@@ -154,9 +163,8 @@ def process_single_row(dial, gmaps_url, shop_en_manual="", shop_ar_manual="", ow
     identifier = dial if dial else "Shop"
     cx, cy, auto_name, has_downloaded_img = parse_google_maps_url_and_download_photo(gmaps_url, shop_identifier=identifier) if gmaps_url else ("", "", "", False)
     
-    # تحديد اسم المحل
-    has_manual_en = bool(str(shop_en_manual).strip() and not pd.isna(shop_en_manual))
-    has_manual_ar = bool(str(shop_ar_manual).strip() and not pd.isna(shop_ar_manual))
+    has_manual_en = bool(shop_en_manual and str(shop_en_manual).strip() and not pd.isna(shop_en_manual))
+    has_manual_ar = bool(shop_ar_manual and str(shop_ar_manual).strip() and not pd.isna(shop_ar_manual))
     
     if has_manual_en and has_manual_ar:
         final_en_name = str(shop_en_manual).strip()
@@ -183,8 +191,7 @@ def process_single_row(dial, gmaps_url, shop_en_manual="", shop_ar_manual="", ow
 
     final_shop_photo = "yes" if (has_downloaded_img or shop_photo_manual == "yes") else "no"
 
-    # تحديد العنوان
-    if str(address_manual).strip() and not pd.isna(address_manual):
+    if address_manual and str(address_manual).strip() and not pd.isna(address_manual):
         user_address = str(address_manual).strip()
         if is_arabic(user_address):
             final_ar_address = user_address
@@ -293,75 +300,12 @@ with tab2:
             st.write("📊 معاينة أولية للملف المرفوع:")
             st.dataframe(input_df.head(5))
             
-            cols = ["-- غير محدد --"] + input_df.columns.tolist()
+            all_cols = input_df.columns.tolist()
+            options = ["-- غير محدد --"] + all_cols
             
             col_sel1, col_sel2 = st.columns(2)
             with col_sel1:
-                dial_col = st.selectbox("حدد عمود الـ DIAL (مطلوب):", input_df.columns.tolist(), index=0 if 'DIAL' not in input_df.columns else input_df.columns.tolist().index('DIAL'))
-                url_col = st.selectbox("حدد عمود الرابط (مطلوب):", input_df.columns.tolist(), index=0 if 'URL' not in input_df.columns else input_df.columns.tolist().index('URL'))
+                dial_col = st.selectbox("حدد عمود الـ DIAL (مطلوب):", all_cols, index=0 if 'DIAL' not in all_cols else all_cols.index('DIAL'))
+                url_col = st.selectbox("حدد عمود الرابط (مطلوب):", all_cols, index=0 if 'URL' not in all_cols else all_cols.index('URL'))
             
-            with col_sel2:
-                shop_name_col = st.selectbox("حدد عمود اسم المحل بالعربي أو بالإنجليزي (اختياري):", cols)
-                address_col = st.selectbox("حدد عمود العنوان (اختياري):", cols)
-
-            if st.button("⚙️ البدء في المعالجة"):
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                bulk_rows = []
-                total = len(input_df)
-                
-                for idx, row_data in input_df.iterrows():
-                    d_val = row_data[dial_col]
-                    u_val = row_data[url_col]
-                    
-                    s_name_val = row_data[shop_name_col] if shop_name_col != "-- غير محدد --" else ""
-                    addr_val = row_data[address_col] if address_col != "-- غير محدد --" else ""
-                    
-                    status_text.text(f"جاري معالجة الصف {idx+1} من {total}...")
-                    
-                    if is_arabic(s_name_val):
-                        processed = process_single_row(dial=d_val, gmaps_url=u_val, shop_ar_manual=s_name_val, address_manual=addr_val, religion=bulk_religion)
-                    else:
-                        processed = process_single_row(dial=d_val, gmaps_url=u_val, shop_en_manual=s_name_val, address_manual=addr_val, religion=bulk_religion)
-                        
-                    bulk_rows.append(processed)
-                    progress_bar.progress((idx + 1) / total)
-                    
-                st.session_state.data_list.extend(bulk_rows)
-                st.success(f"🎉 تم معالجة {total} محل بنجاح!")
-        except Exception as e:
-            st.error(f"حدث خطأ أثناء قراءة الملف: {e}")
-
-# -------------------------------------------------------------
-# 3. عرض الجدول التفاعلي وحفظ التعديلات
-# -------------------------------------------------------------
-if st.session_state.data_list:
-    st.divider()
-    st.subheader("✏️ الجدول التفاعلي (يمكنك تعديل أي خلية أو إضافة/حذف صفوف قبل التحميل)")
-    
-    df_current = pd.DataFrame(st.session_state.data_list)
-    
-    edited_df = st.data_editor(
-        df_current, 
-        num_rows="dynamic", 
-        use_container_width=True,
-        key="data_editor_table"
-    )
-    
-    st.session_state.data_list = edited_df.to_dict('records')
-    
-    col_dl, col_clr = st.columns([3, 1])
-    with col_dl:
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            edited_df.to_excel(writer, index=False, sheet_name='Consumer Wallet')
-        st.download_button(
-            label="📥 تحميل شيت الإكسيل المعدل والمحدث",
-            data=output.getvalue(),
-            file_name="mina_non_telecom_final.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    with col_clr:
-        if st.button("🗑️ مسح الجدول بالكامل"):
-            st.session_state.data_list = []
-            st.rerun()
+            with col_sel
